@@ -1,9 +1,7 @@
-﻿package com.example.adremover.core
+package com.example.adremover.core
 
 import java.io.File
-import java.io.FileOutputStream
 import java.security.KeyPairGenerator
-import java.security.KeyStore
 import java.security.cert.X509Certificate
 import java.util.Date
 import com.android.apksig.ApkSigner
@@ -36,7 +34,6 @@ class ApkSignerUtil {
             val signer = JcaContentSignerBuilder("SHA256WithRSA").build(keyPair.private)
             
             val certificate = JcaX509CertificateConverter()
-                .setProvider("BC")
                 .getCertificate(certBuilder.build(signer))
             
             val signerConfig = ApkSigner.SignerConfig.Builder(
@@ -51,7 +48,7 @@ class ApkSignerUtil {
             
             apkSigner.sign()
             
-            println("Signed: ${outputApk.absolutePath}")
+            println("Signed: `{outputApk.absolutePath}")
             true
         } catch (e: Exception) {
             e.printStackTrace()
