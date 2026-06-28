@@ -1,4 +1,4 @@
-﻿package com.example.adremover.model
+package com.example.adremover.model
 
 import android.graphics.drawable.Drawable
 
@@ -13,7 +13,8 @@ data class AppInfo(
 
 data class AdSignature(
     val name: String,
-    val packagePattern: String
+    val packagePattern: String,
+    val filePatterns: List<String> = emptyList()
 )
 
 data class DetectedAd(
