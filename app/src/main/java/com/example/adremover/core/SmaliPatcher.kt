@@ -13,12 +13,15 @@ class SmaliPatcher {
 
     private companion object {
         const val TAG = "SmaliPatcher"
+        const val META_FILE = ".patch_meta"
     }
 
     fun extractApk(apkFile: File, outputDir: File): Boolean {
         return try {
             if (outputDir.exists()) outputDir.deleteRecursively()
             outputDir.mkdirs()
+
+            val methods = StringBuilder()
 
             ZipFile(apkFile).use { zip ->
                 zip.entries().toList().forEach { entry ->
@@ -33,8 +36,11 @@ class SmaliPatcher {
                             }
                         }
                     }
+                    methods.appendLine("`{entry.name}	`{entry.method}")
                 }
             }
+
+            File(outputDir, META_FILE).writeText(methods.toString())
             true
         } catch (e: Exception) {
             Log.e(TAG, "Extract failed", e)
@@ -113,24 +119,15 @@ class SmaliPatcher {
         return try {
             if (outputApk.exists()) outputApk.delete()
 
-            val zipEntries = mutableMapOf<String, Int>()
-            ZipFile(File(extractedDir.parent, extractOriginalName(extractedDir.name))).use { orig ->
-                orig.entries().toList().forEach { entry ->
-                    zipEntries[entry.name] = entry.method
-                }
-            }
+            val methods = loadCompressionMeta(extractedDir)
 
             ZipOutputStream(FileOutputStream(outputApk)).use { zipOut ->
-                val files = extractedDir.walkTopDown().filter { it.isFile }.toList()
+                val files = extractedDir.walkTopDown().filter { it.isFile && it.name != META_FILE }.toList()
                 files.forEach { file ->
                     val entryName = file.relativeTo(extractedDir).path.replace(File.separatorChar, '/')
                     val entry = ZipEntry(entryName)
-                    val originalMethod = zipEntries[entryName]
-                    if (originalMethod != null) {
-                        entry.method = originalMethod
-                    } else {
-                        entry.method = ZipEntry.DEFLATED
-                    }
+                    val origMethod = methods[entryName]
+                    entry.method = origMethod ?: ZipEntry.DEFLATED
 
                     FileInputStream(file).use { input ->
                         zipOut.putNextEntry(entry)
@@ -147,8 +144,20 @@ class SmaliPatcher {
         }
     }
 
-    private fun extractOriginalName(dirName: String): String {
-        return dirName.removePrefix("extracted_")
+    private fun loadCompressionMeta(extractedDir: File): Map<String, Int> {
+        val metaFile = File(extractedDir, META_FILE)
+        if (!metaFile.exists()) return emptyMap()
+
+        val methods = mutableMapOf<String, Int>()
+        metaFile.readLines().forEach { line ->
+            val parts = line.split("\t")
+            if (parts.size == 2) {
+                val name = parts[0]
+                val method = parts[1].toIntOrNull() ?: ZipEntry.DEFLATED
+                methods[name] = method
+            }
+        }
+        return methods
     }
 
     private fun ByteArray.matchAt(offset: Int, pattern: ByteArray): Boolean {
