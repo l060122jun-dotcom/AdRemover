@@ -2,7 +2,6 @@ package com.example.adremover.core
 
 import java.io.File
 import java.security.KeyPairGenerator
-import java.security.cert.X509Certificate
 import java.util.Date
 import com.android.apksig.ApkSigner
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
@@ -47,8 +46,6 @@ class ApkSignerUtil {
                 .build()
             
             apkSigner.sign()
-            
-            println("Signed: `{outputApk.absolutePath}")
             true
         } catch (e: Exception) {
             e.printStackTrace()
