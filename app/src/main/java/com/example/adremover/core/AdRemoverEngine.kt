@@ -2,13 +2,21 @@ package com.example.adremover.core
 
 import android.content.Context
 import android.os.Environment
+import android.util.Log
 import com.example.adremover.model.AnalysisResult
 import com.example.adremover.model.AppInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class AdRemoverEngine(private val context: Context) {
+
+    private companion object {
+        const val TAG = "AdRemoverEngine"
+    }
 
     private val extractor = AppExtractor(context)
     private val analyzer = AdAnalyzer()
@@ -90,17 +98,20 @@ class AdRemoverEngine(private val context: Context) {
                 "AdRemover"
             ).apply { mkdirs() }
 
-            val finalApk = File(outputDir, "_no_ads.apk")
-            if (finalApk.exists()) finalApk.delete()
-            signedApk.copyTo(finalApk, overwrite = true)
+            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+            val finalApk = File(outputDir, "_no_ads_.apk")
+
+            signedApk.copyTo(finalApk)
 
             originalApk.delete()
             unsignedApk.delete()
             signedApk.delete()
 
+            Log.d(TAG, "Output: `{finalApk.absolutePath}")
             onStateChange(ProcessState.Success(finalApk, appName))
 
         } catch (e: Exception) {
+            Log.e(TAG, "Process failed", e)
             onStateChange(ProcessState.Error(e.message ?: "未知错误"))
         } finally {
             extractedDir?.deleteRecursively()
