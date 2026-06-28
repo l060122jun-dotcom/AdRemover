@@ -28,7 +28,6 @@ class AdRemoverEngine(private val context: Context) {
         object Extracting : ProcessState()
         data class Analyzing(val message: String) : ProcessState()
         data class Patching(val message: String) : ProcessState()
-        object Repackaging : ProcessState()
         object Signing : ProcessState()
         data class Success(val outputFile: File, val appName: String) : ProcessState()
         data class Error(val message: String) : ProcessState()
@@ -42,8 +41,6 @@ class AdRemoverEngine(private val context: Context) {
         packageName: String,
         onStateChange: (ProcessState) -> Unit
     ) = withContext(Dispatchers.IO) {
-
-        var extractedDir: File? = null
 
         try {
             onStateChange(ProcessState.Extracting)
@@ -61,29 +58,17 @@ class AdRemoverEngine(private val context: Context) {
             val adNames = analysis.detectedAds.joinToString { it.signature.name }
             onStateChange(ProcessState.Analyzing("识别广告: "))
 
-            onStateChange(ProcessState.Patching("正在解压APK..."))
-            extractedDir = File(context.cacheDir, "extracted_")
+            onStateChange(ProcessState.Patching("正在修改APK..."))
+            val patchedApk = File(context.cacheDir, "_patched.apk")
+            val patched = patcher.processApk(originalApk, patchedApk, analysis.detectedAds)
 
-            val extracted = patcher.extractApk(originalApk, extractedDir)
-            if (!extracted) {
-                throw Exception("APK解压失败")
-            }
-
-            onStateChange(ProcessState.Patching("正在移除广告组件..."))
-            patcher.patchDexFiles(extractedDir, analysis.detectedAds)
-            patcher.patchManifest(extractedDir, analysis.detectedAds)
-
-            onStateChange(ProcessState.Repackaging)
-            val unsignedApk = File(context.cacheDir, "_unsigned.apk")
-            val repackaged = patcher.repackageApk(extractedDir, unsignedApk)
-
-            if (!repackaged) {
-                throw Exception("APK重打包失败")
+            if (!patched) {
+                throw Exception("APK修改失败")
             }
 
             onStateChange(ProcessState.Signing)
             val signedApk = File(context.cacheDir, "_signed.apk")
-            val signed = signer.signApk(unsignedApk, signedApk)
+            val signed = signer.signApk(patchedApk, signedApk)
 
             if (!signed) {
                 throw Exception("APK签名失败")
@@ -104,17 +89,15 @@ class AdRemoverEngine(private val context: Context) {
             signedApk.copyTo(finalApk)
 
             originalApk.delete()
-            unsignedApk.delete()
+            patchedApk.delete()
             signedApk.delete()
 
-            Log.d(TAG, "Output: `{finalApk.absolutePath}")
+            Log.d(TAG, "Output: `{finalApk.absolutePath}, size=`{finalApk.length()}")
             onStateChange(ProcessState.Success(finalApk, appName))
 
         } catch (e: Exception) {
             Log.e(TAG, "Process failed", e)
             onStateChange(ProcessState.Error(e.message ?: "未知错误"))
-        } finally {
-            extractedDir?.deleteRecursively()
         }
     }
 
