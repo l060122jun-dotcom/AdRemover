@@ -45,23 +45,21 @@ class SmaliPatcher {
     fun patchDexFiles(extractedDir: File, detectedAds: List<DetectedAd>) {
         for (ad in detectedAds) {
             val adPackagePath = ad.signature.packagePattern.replace(".", "/")
-            val originalBytes = adPackagePath.toByteArray(Charsets.US_ASCII)
+            val search = adPackagePath.toByteArray(Charsets.US_ASCII)
+            val poison = buildPoisonPath(search.size).toByteArray(Charsets.US_ASCII)
 
             val dexFiles = extractedDir.listFiles { file -> file.name.endsWith(".dex") }
 
             dexFiles?.forEach { dexFile ->
                 try {
                     val bytes = dexFile.readBytes()
-                    val poison = buildPoisonPath(originalBytes.size)
-                    val poisonBytes = poison.toByteArray(Charsets.US_ASCII)
-
                     var count = 0
                     var i = 0
-                    while (i <= bytes.size - originalBytes.size) {
-                        if (bytes.rangeEquals(i, originalBytes)) {
-                            System.arraycopy(poisonBytes, 0, bytes, i, originalBytes.size)
+                    while (i <= bytes.size - search.size) {
+                        if (bytes.matchAt(i, search)) {
+                            System.arraycopy(poison, 0, bytes, i, search.size)
                             count++
-                            i += originalBytes.size
+                            i += search.size
                         } else {
                             i++
                         }
@@ -92,7 +90,7 @@ class SmaliPatcher {
 
                 var i = 0
                 while (i <= bytes.size - search.size) {
-                    if (bytes.rangeEquals(i, search)) {
+                    if (bytes.matchAt(i, search)) {
                         System.arraycopy(poison, 0, bytes, i, search.size)
                         patched = true
                         i += search.size
@@ -115,12 +113,24 @@ class SmaliPatcher {
         return try {
             if (outputApk.exists()) outputApk.delete()
 
+            val zipEntries = mutableMapOf<String, Int>()
+            ZipFile(File(extractedDir.parent, extractOriginalName(extractedDir.name))).use { orig ->
+                orig.entries().toList().forEach { entry ->
+                    zipEntries[entry.name] = entry.method
+                }
+            }
+
             ZipOutputStream(FileOutputStream(outputApk)).use { zipOut ->
                 val files = extractedDir.walkTopDown().filter { it.isFile }.toList()
                 files.forEach { file ->
                     val entryName = file.relativeTo(extractedDir).path.replace(File.separatorChar, '/')
                     val entry = ZipEntry(entryName)
-                    entry.method = ZipEntry.DEFLATED
+                    val originalMethod = zipEntries[entryName]
+                    if (originalMethod != null) {
+                        entry.method = originalMethod
+                    } else {
+                        entry.method = ZipEntry.DEFLATED
+                    }
 
                     FileInputStream(file).use { input ->
                         zipOut.putNextEntry(entry)
@@ -137,13 +147,23 @@ class SmaliPatcher {
         }
     }
 
+    private fun extractOriginalName(dirName: String): String {
+        return dirName.removePrefix("extracted_")
+    }
+
+    private fun ByteArray.matchAt(offset: Int, pattern: ByteArray): Boolean {
+        if (offset + pattern.size > this.size) return false
+        for (j in pattern.indices) {
+            if (this[offset + j] != pattern[j]) return false
+        }
+        return true
+    }
+
     private fun buildPoisonPath(len: Int): String {
         val sb = StringBuilder()
-        var i = 0
         while (sb.length < len) {
             if (sb.isNotEmpty()) sb.append('/')
             sb.append("x")
-            i++
         }
         return sb.toString().take(len)
     }
