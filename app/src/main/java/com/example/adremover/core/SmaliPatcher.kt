@@ -8,6 +8,8 @@ import java.io.FileOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
+import java.util.zip.Adler32
+import java.security.MessageDigest
 
 class SmaliPatcher {
 
@@ -72,14 +74,38 @@ class SmaliPatcher {
                     }
 
                     if (count > 0) {
+                        fixDexChecksum(bytes)
                         dexFile.writeBytes(bytes)
-                        Log.d(TAG, "Patched `{dexFile.name}: `{count} replacements")
+                        Log.d(TAG, "Patched `{dexFile.name}: `{count} replacements, checksum fixed")
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Patch `{dexFile.name} failed", e)
                 }
             }
         }
+    }
+
+    private fun fixDexChecksum(bytes: ByteArray) {
+        if (bytes.size < 12) return
+        val fileSize = bytes.size
+
+        bytes[32] = (fileSize shr 24).toByte()
+        bytes[33] = (fileSize shr 16).toByte()
+        bytes[34] = (fileSize shr 8).toByte()
+        bytes[35] = (fileSize).toByte()
+
+        val adler = Adler32()
+        adler.update(bytes, 12, fileSize - 12)
+        val checksum = adler.value.toInt()
+        bytes[8] = (checksum shr 24).toByte()
+        bytes[9] = (checksum shr 16).toByte()
+        bytes[10] = (checksum shr 8).toByte()
+        bytes[11] = (checksum).toByte()
+
+        val sha1 = MessageDigest.getInstance("SHA-1")
+        sha1.update(bytes, 32, fileSize - 32)
+        val digest = sha1.digest()
+        System.arraycopy(digest, 0, bytes, 12, 20)
     }
 
     fun patchManifest(extractedDir: File, detectedAds: List<DetectedAd>) {
