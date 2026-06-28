@@ -139,7 +139,6 @@ fun ProcessStateCard(
                         is AdRemoverEngine.ProcessState.Extracting -> "正在提取APK..."
                         is AdRemoverEngine.ProcessState.Analyzing -> "正在分析"
                         is AdRemoverEngine.ProcessState.Patching -> "正在修改"
-                        is AdRemoverEngine.ProcessState.Repackaging -> "正在打包..."
                         is AdRemoverEngine.ProcessState.Signing -> "正在签名..."
                         is AdRemoverEngine.ProcessState.Success -> "处理完成"
                         is AdRemoverEngine.ProcessState.Error -> "处理失败"
