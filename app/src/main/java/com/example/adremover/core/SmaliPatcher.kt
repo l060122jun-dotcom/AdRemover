@@ -54,7 +54,8 @@ class SmaliPatcher {
         for (ad in detectedAds) {
             val adPackagePath = ad.signature.packagePattern.replace(".", "/")
             val search = adPackagePath.toByteArray(Charsets.US_ASCII)
-            val poison = buildPoisonPath(search.size).toByteArray(Charsets.US_ASCII)
+            val poisonLen = search.size
+            val poisonBytes = ByteArray(poisonLen) { 'x'.code.toByte() }
 
             val dexFiles = extractedDir.listFiles { file -> file.name.endsWith(".dex") }
 
@@ -63,11 +64,11 @@ class SmaliPatcher {
                     val bytes = dexFile.readBytes()
                     var count = 0
                     var i = 0
-                    while (i <= bytes.size - search.size) {
+                    while (i <= bytes.size - poisonLen) {
                         if (bytes.matchAt(i, search)) {
-                            System.arraycopy(poison, 0, bytes, i, search.size)
+                            System.arraycopy(poisonBytes, 0, bytes, i, poisonLen)
                             count++
-                            i += search.size
+                            i += poisonLen
                         } else {
                             i++
                         }
@@ -76,7 +77,7 @@ class SmaliPatcher {
                     if (count > 0) {
                         fixDexChecksum(bytes)
                         dexFile.writeBytes(bytes)
-                        Log.d(TAG, "Patched `{dexFile.name}: `{count} replacements, checksum fixed")
+                        Log.d(TAG, "Patched `{dexFile.name}: `{count} replacements")
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Patch `{dexFile.name} failed", e)
@@ -86,13 +87,18 @@ class SmaliPatcher {
     }
 
     private fun fixDexChecksum(bytes: ByteArray) {
-        if (bytes.size < 12) return
+        if (bytes.size < 36) return
         val fileSize = bytes.size
 
         bytes[32] = (fileSize shr 24).toByte()
         bytes[33] = (fileSize shr 16).toByte()
         bytes[34] = (fileSize shr 8).toByte()
         bytes[35] = (fileSize).toByte()
+
+        val sha1 = MessageDigest.getInstance("SHA-1")
+        sha1.update(bytes, 32, fileSize - 32)
+        val digest = sha1.digest()
+        System.arraycopy(digest, 0, bytes, 12, 20)
 
         val adler = Adler32()
         adler.update(bytes, 12, fileSize - 12)
@@ -101,11 +107,6 @@ class SmaliPatcher {
         bytes[9] = (checksum shr 16).toByte()
         bytes[10] = (checksum shr 8).toByte()
         bytes[11] = (checksum).toByte()
-
-        val sha1 = MessageDigest.getInstance("SHA-1")
-        sha1.update(bytes, 32, fileSize - 32)
-        val digest = sha1.digest()
-        System.arraycopy(digest, 0, bytes, 12, 20)
     }
 
     fun patchManifest(extractedDir: File, detectedAds: List<DetectedAd>) {
@@ -118,12 +119,12 @@ class SmaliPatcher {
 
             for (ad in detectedAds) {
                 val search = ad.signature.packagePattern.toByteArray(Charsets.US_ASCII)
-                val poison = buildPoisonPath(search.size).toByteArray(Charsets.US_ASCII)
+                val poisonBytes = ByteArray(search.size) { 'x'.code.toByte() }
 
                 var i = 0
                 while (i <= bytes.size - search.size) {
                     if (bytes.matchAt(i, search)) {
-                        System.arraycopy(poison, 0, bytes, i, search.size)
+                        System.arraycopy(poisonBytes, 0, bytes, i, search.size)
                         patched = true
                         i += search.size
                     } else {
@@ -192,14 +193,5 @@ class SmaliPatcher {
             if (this[offset + j] != pattern[j]) return false
         }
         return true
-    }
-
-    private fun buildPoisonPath(len: Int): String {
-        val sb = StringBuilder()
-        while (sb.length < len) {
-            if (sb.isNotEmpty()) sb.append('/')
-            sb.append("x")
-        }
-        return sb.toString().take(len)
     }
 }
