@@ -1,23 +1,28 @@
-﻿package com.example.adremover.core
+package com.example.adremover.core
 
+import android.util.Log
 import com.example.adremover.model.DetectedAd
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
 class SmaliPatcher {
-    
+
+    private companion object {
+        const val TAG = "SmaliPatcher"
+    }
+
     fun extractApk(apkFile: File, outputDir: File): Boolean {
         return try {
             if (outputDir.exists()) outputDir.deleteRecursively()
             outputDir.mkdirs()
-            
+
             ZipFile(apkFile).use { zip ->
                 zip.entries().toList().forEach { entry ->
                     val outputFile = File(outputDir, entry.name)
-                    
                     if (entry.isDirectory) {
                         outputFile.mkdirs()
                     } else {
@@ -30,97 +35,116 @@ class SmaliPatcher {
                     }
                 }
             }
-            
             true
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "Extract failed", e)
             false
         }
     }
-    
+
     fun patchDexFiles(extractedDir: File, detectedAds: List<DetectedAd>) {
         for (ad in detectedAds) {
             val adPackagePath = ad.signature.packagePattern.replace(".", "/")
-            
-            val dexFiles = extractedDir.listFiles { file -> file.extension == "dex" }
-            
+            val originalBytes = adPackagePath.toByteArray(Charsets.US_ASCII)
+
+            val dexFiles = extractedDir.listFiles { file -> file.name.endsWith(".dex") }
+
             dexFiles?.forEach { dexFile ->
                 try {
                     val bytes = dexFile.readBytes()
-                    val content = String(bytes, Charsets.UTF_8)
-                    
-                    var modifiedContent = content
-                    var modified = false
-                    
-                    if (content.contains(adPackagePath)) {
-                        modifiedContent = content.replace(adPackagePath, "removed/$adPackagePath")
-                        modified = true
+                    val poison = buildPoisonPath(originalBytes.size)
+                    val poisonBytes = poison.toByteArray(Charsets.US_ASCII)
+
+                    var count = 0
+                    var i = 0
+                    while (i <= bytes.size - originalBytes.size) {
+                        if (bytes.rangeEquals(i, originalBytes)) {
+                            System.arraycopy(poisonBytes, 0, bytes, i, originalBytes.size)
+                            count++
+                            i += originalBytes.size
+                        } else {
+                            i++
+                        }
                     }
-                    
-                    if (modified) {
-                        dexFile.writeBytes(modifiedContent.toByteArray(Charsets.UTF_8))
-                        println("Patched: ${dexFile.name}")
+
+                    if (count > 0) {
+                        dexFile.writeBytes(bytes)
+                        Log.d(TAG, "Patched `{dexFile.name}: `{count} replacements")
                     }
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    Log.e(TAG, "Patch `{dexFile.name} failed", e)
                 }
             }
         }
     }
-    
+
     fun patchManifest(extractedDir: File, detectedAds: List<DetectedAd>) {
         val manifestFile = File(extractedDir, "AndroidManifest.xml")
         if (!manifestFile.exists()) return
-        
+
         try {
             val bytes = manifestFile.readBytes()
-            var content = String(bytes, Charsets.UTF_8)
-            var modified = false
-            
+            var patched = false
+
             for (ad in detectedAds) {
-                val adPackage = ad.signature.packagePattern
-                
-                if (content.contains(adPackage)) {
-                    content = content.replace(adPackage, "removed.$adPackage")
-                    modified = true
+                val search = ad.signature.packagePattern.toByteArray(Charsets.US_ASCII)
+                val poison = buildPoisonPath(search.size).toByteArray(Charsets.US_ASCII)
+
+                var i = 0
+                while (i <= bytes.size - search.size) {
+                    if (bytes.rangeEquals(i, search)) {
+                        System.arraycopy(poison, 0, bytes, i, search.size)
+                        patched = true
+                        i += search.size
+                    } else {
+                        i++
+                    }
                 }
             }
-            
-            if (modified) {
-                manifestFile.writeBytes(content.toByteArray(Charsets.UTF_8))
-                println("Manifest patched")
+
+            if (patched) {
+                manifestFile.writeBytes(bytes)
+                Log.d(TAG, "Manifest patched")
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "Manifest patch failed", e)
         }
     }
-    
+
     fun repackageApk(extractedDir: File, outputApk: File): Boolean {
         return try {
             if (outputApk.exists()) outputApk.delete()
-            
+
             ZipOutputStream(FileOutputStream(outputApk)).use { zipOut ->
-                extractedDir.walkTopDown()
-                    .filter { it.isFile }
-                    .forEach { file ->
-                        val entryName = file.relativeTo(extractedDir).path.replace(File.separatorChar, '/')
-                        
-                        val entry = ZipEntry(entryName)
+                val files = extractedDir.walkTopDown().filter { it.isFile }.toList()
+                files.forEach { file ->
+                    val entryName = file.relativeTo(extractedDir).path.replace(File.separatorChar, '/')
+                    val entry = ZipEntry(entryName)
+                    entry.method = ZipEntry.DEFLATED
+
+                    FileInputStream(file).use { input ->
                         zipOut.putNextEntry(entry)
-                        
-                        file.inputStream().use { input ->
-                            input.copyTo(zipOut)
-                        }
-                        
+                        input.copyTo(zipOut)
                         zipOut.closeEntry()
                     }
+                }
             }
-            
-            println("Repackaged: ${outputApk.absolutePath}")
+            Log.d(TAG, "Repackaged: `{outputApk.absolutePath}, size=`{outputApk.length()}")
             true
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e(TAG, "Repackage failed", e)
             false
         }
+    }
+
+    private fun buildPoisonPath(len: Int): String {
+        val sb = StringBuilder()
+        var i = 0
+        while (sb.length < len) {
+            if (sb.isNotEmpty()) sb.append('/')
+            sb.append("x")
+            i++
+        }
+        return sb.toString().take(len)
     }
 }
